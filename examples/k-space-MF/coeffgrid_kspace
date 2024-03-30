@@ -1,0 +1,2 @@
+coeffgrid = np.zeros_like(kgrid,dtype='complex')
+coeffgrid[ktoIndex(0)] = 1.0+0.0j
