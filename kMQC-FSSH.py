@@ -5,7 +5,6 @@ from numba import jit
 import ray
 import scipy
 
-np.random.seed(1234)
 ray.init(ignore_reinit_error=True)
 inputfile = str(sys.argv[1])
 rev = False
@@ -148,24 +147,6 @@ with open(coeff_file) as f:
         exec(str(line))
 
 
-def timestepRK_C(p0, q0, QF, dt):
-    dim = len(p0)
-    wgrid1 = np.zeros((int(dim / npoints), npoints))
-    wgrid1[:] = wgrid
-    wgrid1 = wgrid1.reshape(-1)
-    fq, fp = QF
-
-    def f_ho(t, Y):
-        p1 = Y[0:dim]
-        q1 = Y[dim:]
-        return np.concatenate((-1.0 * wgrid1 ** 2 * q1 - fq, p1 + fp))
-
-    soln1 = it.solve_ivp(f_ho, (0, dt), np.concatenate((p0, q0)), method='RK45', max_step=dt / c_res, t_eval=[dt])
-    p2 = soln1.y[0:dim]
-    q2 = soln1.y[dim:]
-    return p2.reshape((int(dim / npoints), npoints)), q2.reshape((int(dim / npoints), npoints))
-
-
 @jit(nopython=True)
 def RK4(p_bath, q_bath, QF, dt):
     Fq, Fp = QF
@@ -189,24 +170,6 @@ def timestepRK_Q(mat, cgrid, dt):
     soln4 = it.solve_ivp(f_qho, (0, dt[-1]), cgrid, method='RK45', max_step=dt[0] / q_res,
                          t_eval=dt)  # , rtol=1e-10, atol=1e-10)
     return np.transpose(soln4.y)
-
-
-def timestepMEXP(mat, coeffgrid, dt):
-    mat_exp = expm(-1.0j * mat * dt)
-    return np.matmul(mat_exp, coeffgrid)
-
-
-def eC(p, q):
-    return np.real(sum(((m * wgrid ** 2) / 2) * q ** 2 + (1 / (2 * m)) * p ** 2))
-
-
-def e_k(mat, cg):
-    return np.conj(cg) * np.matmul(mat, cg) / (np.conj(cg) * cg)
-
-
-def V_jk(mat, cg):
-    return np.diag(e_k(mat, cg))
-
 
 def rho_0_adb_to_db(rho_0_adb, eigvec):
     rho_0_db = np.dot(np.dot(eigvec, rho_0_adb), np.conj(eigvec).transpose())
@@ -245,11 +208,6 @@ def vec_db_to_adb(psi_db, eigvec):
     psi_ad = np.einsum('...ij,...i', eigvec, psi_db)
     return psi_ad
 
-
-def pops(ev):
-    probs = np.exp(-(1 / (kB * temp)) * ev)
-    z = np.sum(probs, axis=-1)
-    return probs / z
 
 
 @jit(nopython=True)
@@ -321,19 +279,6 @@ if space == 'r-space':
             return out_mat
 
 
-        def gen_mat(p, q):
-            return q_mat() + qc_mat(p, q)
-
-
-        @jit(nopython=True)
-        def der_mat_q():
-            return np.diag(gc * wgrid * np.sqrt(2 * m * wgrid))
-
-
-        def der_mat_p():
-            return np.zeros((npoints, npoints))
-
-
         @jit(nopython=True)
         def quantumForce(coeffgrid):
             return np.real(np.conj(coeffgrid) * gc * wgrid * np.sqrt(2 * m * wgrid) * coeffgrid), np.real(0 * coeffgrid)
@@ -390,14 +335,6 @@ if space == 'r-space':
                         np.conj(coeffgrid[cycle(n - 1)]) * coeffgrid[cycle(n)]))
                 Fp[n] += 0
             return np.real(Fq), np.real(Fp)
-
-
-        def eQ(coeffgrid):
-            return np.real(np.matmul(np.conj(coeffgrid), np.matmul(q_mat(), coeffgrid)))
-
-
-        def eQC(mat, coeffgrid):
-            return np.real(np.matmul(np.conj(coeffgrid), np.matmul(mat, coeffgrid)))
 
 
         # @jit(nopython=True)
@@ -652,20 +589,6 @@ if space == 'k-space':
                 outmat[i] = qc_mat_gen(p[i], q[i])
             return outmat
 
-
-        @jit(nopython=True)
-        def gen_mat(p, q):
-            return qc_mat(p, q) + q_mat()
-
-
-        def eQC(mat, cgrid):
-            return np.real(np.matmul(np.conjugate(cgrid), np.matmul(mat, cgrid)))
-
-
-        def eQ(cgrid):
-            return np.real(sum(np.conjugate(cgrid) * egridQ * cgrid))
-
-
         @jit(nopython=True)
         def get_dkk(eig_k_in, eig_j_in, evdiff):
             dkkq = np.ascontiguousarray(np.zeros(npoints) + 0.0j)
@@ -836,7 +759,6 @@ def runSim(index, p0, q0):
                 fq[i] = fq0
                 fp[i] = fp0
     den_mat_db_sum = np.sum(den_mat_db_tot[:, :, :, :], axis=1)
-    den_mat_adb_sum = np.sum(den_mat_adb_tot[:, :, :, :], axis=1)
     pops_db = np.real(np.einsum('...jj->...j', den_mat_db_sum))
     pops_db_fft = np.real(np.einsum('...jj->...j',np.einsum('aj,njk,bk->nab',F_nk_trunc,den_mat_db_sum,np.conjugate(F_nk_trunc))))
     b_pop_db_sum = np.sum(b_pop_db_tot[:, :, :, :], axis=1) / npoints
