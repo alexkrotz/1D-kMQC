@@ -1,0 +1,13 @@
+npoints = 12 # number of points in untruncated lattice, must be even
+space = 'r-space' # representation 'k-space' or 'r-space'
+model = 'holstein' # model, holstein or peierls
+coeff_file = 'coeffgrid_rspace' # file containing initial wavefunction coefficient
+nprocs = 2 # number of processors to use
+ntrials = 2 # number of trials, should be integer multiple of nprocs
+tmax = 100 # maximum time
+dt = .1 # output time interval
+dt_bath = .02 # dynamics time interval
+temp = 0.5 # temperature
+gc = 2 # electron-phonon coupling
+J = -1.0 # nearest-neighbor coupling integral (sign convention is reversed)
+w = 0.2 # classical oscillator frequency
