@@ -244,6 +244,10 @@ def hamilt_diag(hamilt, eigvec_previous):
 def rescale_dkk(dkkq, dkkp):
     return np.abs(dkkq) * np.sign(np.real(dkkq)), np.abs(dkkp) * np.sign(np.real(dkkp))
 
+def rescale_dkk(dkkq, dkkp):
+    phase = np.angle(dkkq[np.argmax(np.abs(dkkq))])
+    return dkkq*np.exp(-1.0j*phase), dkkp*np.exp(-1.0j*phase)
+
 def boltz_grid(t, egrid):
     z = np.sum(np.exp(-1.0 * (1.0 / (kB * t)) * egrid), axis=1)
     return np.exp(-1.0 * (1.0 / (kB * t)) * egrid) / (z.reshape((-1, 1)))
@@ -728,6 +732,12 @@ def runSim(index, p0, q0):
                     ev_diff = eigval_j - eigval_k
                     dkkq, dkkp = get_dkk(eig_k, eig_j, ev_diff)
                     dkkq, dkkp = rescale_dkk(dkkq, dkkp)
+                    im_dkkq = np.imag(dkkq)
+                    im_dkkp = np.imag(dkkp)
+                    if np.sum(np.abs(im_dkkq)) > 1e-6 or np.sum(np.abs(im_dkkq)) > 1e-6:
+                        print('ERROR: imaginary dkk')
+                    dkkq = np.real(dkkq)
+                    dkkp = np.real(dkkp)
                     akkq = (1 / 2) * np.sum(dkkq * dkkq)
                     akkp = (1 / 2) * (w ** 2) * np.sum(dkkp * dkkp)
                     bkkq = np.sum(p[i] * dkkq)
