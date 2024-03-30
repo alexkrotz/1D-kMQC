@@ -1,0 +1,1 @@
+coeffgrid = np.zeros_like(kgrid,dtype='complex') + np.sqrt(1/npoints) + 0.0j
