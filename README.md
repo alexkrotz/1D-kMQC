@@ -17,6 +17,8 @@ and [4] for MF and FSSH respectively.
 1. Navigate to the example directories containing the input files, for example: `examples/k-space-MF/` for 
 a mean-field calculation in reciprocal space. All files needed for a calculation are already present in those folders including the inputfile 
 ` inputfile_holstein` (for a holstein type coupling). 
+   * Note that `coeffgrid_kspace` and `coeffgrid_rspace` can be directly reused without modification 
+      for any simulation type and parameters.
 2. The inputfile contains a description of all the necessary parameters for defining the physical system 
 and simulation, modify the inputs as needed. An example is reproduced here:
     ```
