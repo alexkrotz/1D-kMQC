@@ -7,7 +7,6 @@ import scipy
 
 ray.init(ignore_reinit_error=True)
 inputfile = str(sys.argv[1])
-rev = False
 with open(inputfile) as f:
     for line in f:
         line1 = line.replace(" ", "")
@@ -16,20 +15,11 @@ with open(inputfile) as f:
         # exec('global '+str(name))
         exec(str(line))
 
-q_res = 1
-c_res = 1
-E=0
 kB = 1
 hbar=1
-m=1
-
-io = True
-rev=False
-te = True
-
-
 
 if space == 'k-space':
+    # initialize k-space grids and truncations
     a = np.pi  # lattice parameter (should be pi)
     ran = [-np.pi / (rvar * a), np.pi / (rvar * a)]  # range of BZ included in calculation
     kgrid = np.delete(np.linspace(-np.pi / a, np.pi / a, npoints + 1), -1)  # untruncated k grid
@@ -37,15 +27,14 @@ if space == 'k-space':
     wgridQ = 2 * J * np.cos(2 * np.pi * (kgrid / (kgrid[1] - kgrid[0])) / npoints)  # quantum dispersion
 
 if space == 'r-space':
-    rvar = 1
+    rvar = 1 # in real-space rvar must always be 1, no truncation
     a = np.pi  # lattice parameter (should be pi)
     ran = [-np.pi / (rvar * a), np.pi / (rvar * a)]  # range of BZ included in calculation
     kgrid = np.delete(np.linspace(-np.pi / a, np.pi / a, npoints + 1), -1)  # untruncated k grid
     wgrid = np.zeros_like(kgrid) + w  # classical oscillator frequency dispersion for one optical mode
     wgridQ = 2 * J * np.cos(2 * np.pi * (kgrid / (kgrid[1] - kgrid[0])) / npoints)  # quantum dispersion
-dk = kgrid[1] - kgrid[0]
+dk = kgrid[1] - kgrid[0] # grid spacing
 aux = '_FSSH'
-io = True
 
 foldername = str(space) + '_' + str(model) + '_t_' + str(tmax) + '_dt_' + str(dt) + '_npts_' + str(
     npoints) + '_J_' + str(J) + '_w_' + str(w) + '_g_' \
@@ -63,23 +52,7 @@ if space == 'r-space':
 nkgrid = np.arange(0, npoints, dtype=int)
 
 
-def kron(a, b):
-    if a == b:
-        return 1
-    if a != b:
-        return 0
-
-
-def ktoIndex(k):
-    index = round((k + (np.pi / (a))) / dk, 0)
-    if index < 0:
-        index = index + (npoints)
-    if index > npoints - 1:
-        index = index - (npoints)
-    return int(round(index - ((npoints / 2) + (kgrid[0] / dk))))
-
-
-def ktoIndex1(k):
+def ktoIndex1(k): # convert k value to grid index
     index = round((k + (np.pi / a)) / dk, 0)
     if index < 0:
         index = index + (npoints)
@@ -87,13 +60,13 @@ def ktoIndex1(k):
         index = index - (npoints)
     return int(round(index))
 
-
-untkgrid = kgrid
-kgrid = np.array([k for k in kgrid if k <= ran[1] and k >= ran[0]])
-wgrid = np.array([wgrid[ktoIndex1(k)] for k in kgrid if k <= ran[1] and k >= ran[0]])
-tnkgrid = np.array([nkgrid[ktoIndex1(k)] for k in kgrid if k <= ran[1] and k >= ran[0]])
-wgridQ = np.array([wgridQ[ktoIndex1(k)] for k in kgrid if k <= ran[1] and k >= ran[0]])
-egridQ = hbar * wgridQ
+# construct truncated energy and frequency grids
+untkgrid = kgrid # untruncated grid
+kgrid = np.array([k for k in kgrid if k <= ran[1] and k >= ran[0]]) # truncated grid
+wgrid = np.array([wgrid[ktoIndex1(k)] for k in kgrid if k <= ran[1] and k >= ran[0]]) # truncated classical frequency
+tnkgrid = np.array([nkgrid[ktoIndex1(k)] for k in kgrid if k <= ran[1] and k >= ran[0]]) # truncated grid index
+wgridQ = np.array([wgridQ[ktoIndex1(k)] for k in kgrid if k <= ran[1] and k >= ran[0]]) # truncated quantum frequency
+egridQ = hbar * wgridQ # truncated quantum energy
 
 
 # construct full fourier transform matrix
@@ -108,7 +81,7 @@ for n in range(len(nkgrid)):
     for k_n in range(len(tnkgrid)):
         F_nk_trunc[n, k_n] = (1 / np.sqrt(len(nkgrid))) * np.exp(1.0j * np.pi * n * kgrid[k_n])
 @jit(nopython=True)
-def cycle(index):
+def cycle(index): # loop grid index over the grid
     while index > npoints - 1 or index < 0:
         if index > npoints - 1:
             index = index - npoints
@@ -120,7 +93,7 @@ def cycle(index):
 cyclev = np.vectorize(cycle)
 
 
-def init_classical():
+def init_classical(): # sample classical coordinates from a boltzmann distribution
     p = np.array([])
     q = np.array([])
     for w in wgrid:
@@ -133,14 +106,14 @@ def init_classical():
     return np.array(p), np.array(q)
 
 
-def init_classical_parallel(nt):
+def init_classical_parallel(nt): # generate coordinates for each trajectory
     p = np.zeros((nt, len(wgrid)))
     q = np.zeros((nt, len(wgrid)))
     for i in range(nt):
         p[i], q[i] = init_classical()
     return p, q
 
-
+# initialize wavefunction
 with open(coeff_file) as f:
     for line in f:
         line = line.rstrip('\n')
@@ -148,7 +121,7 @@ with open(coeff_file) as f:
 
 
 @jit(nopython=True)
-def RK4(p_bath, q_bath, QF, dt):
+def RK4(p_bath, q_bath, QF, dt): # Evovle classical coordinates with RK4
     Fq, Fp = QF
     K1 = dt * (p_bath + Fp)
     L1 = -dt * (wgrid ** 2 * q_bath + Fq)  # [wn2] is w_alpha ^ 2
@@ -163,25 +136,32 @@ def RK4(p_bath, q_bath, QF, dt):
     return p_bath, q_bath
 
 
-def timestepRK_Q(mat, cgrid, dt):
+def timestepRK_Q(mat, cgrid, dt): # Evolve quantum coefficients with RK4
     def f_qho(t, c):
         return -1.0j * np.matmul(mat, c)
-
-    soln4 = it.solve_ivp(f_qho, (0, dt[-1]), cgrid, method='RK45', max_step=dt[0] / q_res,
+    soln4 = it.solve_ivp(f_qho, (0, dt[-1]), cgrid, method='RK45', max_step=dt[0],
                          t_eval=dt)  # , rtol=1e-10, atol=1e-10)
     return np.transpose(soln4.y)
 
-def rho_0_adb_to_db(rho_0_adb, eigvec):
+
+def timestepRK_Q(mat, cgrid, dt): # Evolve quantum coefficients with RK4
+    def f_qho(t, c):
+        return -1.0j * np.matmul(mat, c)
+    soln4 = it.solve_ivp(f_qho, (0, dt[-1]), cgrid, method='RK45', max_step=dt[0],
+                         t_eval=dt)  # , rtol=1e-10, atol=1e-10)
+    return np.transpose(soln4.y)
+
+def rho_0_adb_to_db(rho_0_adb, eigvec): # Transform initial adiabatic density matrix to diabatic basis
     rho_0_db = np.dot(np.dot(eigvec, rho_0_adb), np.conj(eigvec).transpose())
     return rho_0_db
 
 
-def rho_0_db_to_adb(rho_0_db, eigvec):
+def rho_0_db_to_adb(rho_0_db, eigvec): # Transform initial diabatic density matrix to adiabatic basis
     rho_0_adb = np.dot(np.dot(np.conj(eigvec).transpose(), rho_0_db), eigvec)
     return rho_0_adb
 
 
-def rho_adb_to_db(rho_adb, eigvec):
+def rho_adb_to_db(rho_adb, eigvec): # Transform branched adiabatic density matrix to diabatic basis
     rho_db = np.zeros_like(rho_adb)
     # for i in range(npoints):
     #    rho_db[i] = np.dot(np.dot(eigvec[i],rho_adb[i]),np.conj(eigvec[i]).transpose())
@@ -191,7 +171,7 @@ def rho_adb_to_db(rho_adb, eigvec):
     return rho_db
 
 
-def rho_db_to_adb(rho_db, eigvec):
+def rho_db_to_adb(rho_db, eigvec): # transform branched diabatic density matrix to adiabatic basis
     # transpose eigvec matrix for each branch (page)
     rho_adb = np.matmul(np.matmul(np.transpose(np.conj(eigvec), axes=(0, 2, 1)), rho_db), eigvec)
     return rho_adb
@@ -209,7 +189,6 @@ def vec_db_to_adb(psi_db, eigvec):
     return psi_ad
 
 
-
 @jit(nopython=True)
 def nan_num(num):
     if np.isnan(num):
@@ -223,7 +202,7 @@ def nan_num(num):
 
 
 nan_num_vec = np.vectorize(nan_num)
-@jit(nopython=True)
+@jit(nopython=True) # gauge transform eigenvectors to ensure parallel transport
 def sign_adjust(eigvec_sort, eigvec_prev):
     wf_overlap = np.sum(np.conj(eigvec_prev) * eigvec_sort, axis=0)
     phase = wf_overlap / np.abs(wf_overlap)
@@ -232,7 +211,7 @@ def sign_adjust(eigvec_sort, eigvec_prev):
         eigvec_out[:, n] = eigvec_sort[:, n] * np.conj(phase[n])
     return eigvec_out
 
-def hamilt_diag(hamilt, eigvec_previous):
+def hamilt_diag(hamilt, eigvec_previous): # diagonalize Hamiltonian and adjust sign in each branch
     eigval_out = np.zeros((len(kgrid), len(kgrid)), dtype=complex)
     eigvec_out = np.zeros((len(kgrid), len(kgrid), len(kgrid)), dtype=complex)
     eigval, eigvec = np.linalg.eigh(hamilt)
@@ -240,15 +219,11 @@ def hamilt_diag(hamilt, eigvec_previous):
         eigval_out[i], eigvec_out[i] = eigval[i], sign_adjust(eigvec[i], eigvec_previous[i])
     return eigval_out, eigvec_out
 
-
-def rescale_dkk(dkkq, dkkp):
-    return np.abs(dkkq) * np.sign(np.real(dkkq)), np.abs(dkkp) * np.sign(np.real(dkkp))
-
-def rescale_dkk(dkkq, dkkp):
+def rescale_dkk(dkkq, dkkp): # choose gauge that turns dkk real
     phase = np.angle(dkkq[np.argmax(np.abs(dkkq))])
     return dkkq*np.exp(-1.0j*phase), dkkp*np.exp(-1.0j*phase)
 
-def boltz_grid(t, egrid):
+def boltz_grid(t, egrid): # compute boltzmann populations
     z = np.sum(np.exp(-1.0 * (1.0 / (kB * t)) * egrid), axis=1)
     return np.exp(-1.0 * (1.0 / (kB * t)) * egrid) / (z.reshape((-1, 1)))
 
@@ -256,49 +231,36 @@ def boltz_grid(t, egrid):
 if space == 'r-space':
     if model == 'holstein':
         @jit(nopython=True)
-        def q_mat():
-            e1 = E * np.diag(np.zeros(npoints))
+        def q_mat():  # quantum Hamiltonian
+            e1 = np.diag(np.zeros(npoints))
             for n in range(npoints):
                 e1[cycle(n + 1), cycle(n)] += J
                 e1[cycle(n), cycle(n + 1)] += J
             return e1
 
 
-        def qc_mat_old(p, q):
-            dim = len(p)
-            wgrid1 = np.zeros((int(dim / npoints), npoints))
-            wgrid1[:] = wgrid
-            wgrid1 = wgrid1.reshape(-1)
-            qc_mat_gen = np.zeros((int(dim / npoints), npoints, npoints))
-            diag = (gc * wgrid1 * np.sqrt(2 * m * wgrid1) * q)
-            np.einsum('...jj->...j', qc_mat_gen)[...] = diag.reshape(int(dim / npoints), npoints)
-            return qc_mat_gen  # .reshape((-npoints,npoints))
-
-
         @jit(nopython=True)
-        def qc_mat(p, q):
+        def qc_mat(p, q):  # quantum-classical Hamiltonian
             out_mat = np.asfortranarray(np.zeros((npoints, npoints, npoints)))
             for n in range(npoints):
-                out_mat[n] = np.diag(gc * wgrid * np.sqrt(2 * m * wgrid) * q[n])
+                out_mat[n] = np.diag(gc * wgrid * np.sqrt(2 * wgrid) * q[n])
             return out_mat
 
 
         @jit(nopython=True)
-        def quantumForce(coeffgrid):
-            return np.real(np.conj(coeffgrid) * gc * wgrid * np.sqrt(2 * m * wgrid) * coeffgrid), np.real(0 * coeffgrid)
+        def quantumForce(coeffgrid):  # quantum Force
+            return np.real(np.conj(coeffgrid) * gc * wgrid * np.sqrt(2 * wgrid) * coeffgrid), np.real(0 * coeffgrid)
 
 
         # @jit(nopython=True)
-        def get_dkk(eig_k, eig_j, evdiff):
-            dkkq = np.real((np.conj(eig_k) * gc * wgrid * np.sqrt(2 * m * wgrid) * eig_j) / evdiff)
+        def get_dkk(eig_k, eig_j, evdiff): # nonadiabatic couplings
+            dkkq = np.real((np.conj(eig_k) * gc * wgrid * np.sqrt(2 * wgrid) * eig_j) / evdiff)
             dkkp = np.zeros(npoints)
-            if np.any(np.imag(dkkq) > 0.0000001):
-                print('DKKQ error: ', np.imag(dkkq))
-            return np.real(dkkq), np.real(dkkp)
+            return dkkq, dkkp
     if model == 'peierls':
         @jit(nopython=True)
-        def q_mat():
-            e1 = E * np.diag(np.ones(npoints))
+        def q_mat(): # quantum Hamiltonian in single branch
+            e1 = np.diag(np.ones(npoints))
             for n in range(npoints):
                 e1[cycle(n + 1), cycle(n)] += J
                 e1[cycle(n), cycle(n + 1)] += J
@@ -306,7 +268,7 @@ if space == 'r-space':
 
 
         @jit(nopython=True)
-        def qc_mat_gen(p, q):
+        def qc_mat_gen(p, q): # quantum-classical Hamiltonian in single branch
             mat = np.zeros((npoints, npoints))
             for n in range(npoints):
                 mat[cycle(n + 1), cycle(n)] += gc * wgrid[n] * np.sqrt(2) * (
@@ -317,20 +279,16 @@ if space == 'r-space':
 
 
         @jit(nopython=True)
-        def qc_mat(p, q):
+        def qc_mat(p, q): # quantum-classical Hamiltonian in all branches
             out_mat = np.asfortranarray(np.zeros((npoints, npoints, npoints)))
             for n in range(npoints):
                 out_mat[n] = qc_mat_gen(p[n], q[n])
             return out_mat
 
 
-        @jit(nopython=True)
-        def gen_mat(p, q):
-            return q_mat() + qc_mat(p, q)
-
 
         @jit(nopython=True)
-        def quantumForce(coeffgrid):
+        def quantumForce(coeffgrid): # quantum force
             Fq = np.zeros_like(coeffgrid)
             Fp = np.zeros_like(coeffgrid)
             for n in range(npoints):
@@ -342,23 +300,21 @@ if space == 'r-space':
 
 
         # @jit(nopython=True)
-        def get_dkk(eig_k, eig_j, evdiff):
+        def get_dkk(eig_k, eig_j, evdiff): # nonadiabatic coupling
             dkkq = np.ascontiguousarray(np.zeros(npoints))
             for n in range(npoints):
                 dkkq[n] = np.real(gc * wgrid[n] * np.sqrt(2 * wgrid[n]) * 2 * (
                             np.real(np.conj(eig_k[cycle(n + 1)]) * eig_j[cycle(n)]) - np.real(
                         np.conj(eig_k[cycle(n - 1)]) * eig_j[cycle(n)])) / evdiff)
             dkkp = np.ascontiguousarray(np.zeros(npoints))
-            if np.any(np.imag(dkkq) > 0.0000001):
-                print('DKKQ error: ', np.imag(dkkq))
-            return np.real(dkkq), np.real(dkkp)
+            return dkkq, dkkp
 ########### K-Space Functions ###########
 if space == 'k-space':
     if model == 'holstein_impurity':
 
         @jit(nopython=True)
-        def q_mat_site():
-            e1 = E * np.diag(np.zeros(npoints))
+        def q_mat_site(): # quantum Hamiltonian (nearest neighbor) in site basis
+            e1 = np.diag(np.zeros(npoints))
             for n in range(npoints):
                 e1[cycle(n + 1), cycle(n)] += J
                 e1[cycle(n), cycle(n + 1)] += J
@@ -366,21 +322,19 @@ if space == 'k-space':
 
 
         #@jit(nopython=True)
-        def q_mat():
+        def q_mat(): # quantum Hamiltonian in truncated k-space basis
             H_q_site = q_mat_site()  # full real-space matrix
             H_q_site[impurity_site, impurity_site] += impurity_energy
             H_q_k_trunc = np.matmul(np.conjugate(np.transpose(F_nk_trunc)), np.matmul(H_q_site, F_nk_trunc))
-
             return H_q_k_trunc
 
 
         @jit(nopython=True)
-        def quantumForce(coeffgrid):
+        def quantumForce(coeffgrid): # quantum force on truncated grid
             cg = np.ascontiguousarray(np.zeros(npoints) + 0.0j)
             cg[tnkgrid] = coeffgrid
             fq = np.ascontiguousarray(np.zeros(npoints))
             fp = np.ascontiguousarray(np.zeros(npoints))
-            coeffgrid = np.ascontiguousarray(coeffgrid)
             for kappa in nkgrid:
                 cgroll_pk = np.ascontiguousarray(np.conj(np.concatenate((cg[-kappa:], cg[:-kappa]))))
                 fq[cycle(int(npoints / 2) + kappa)] = gc * (np.sqrt(2 * w ** 3) / np.sqrt(npoints)) * np.real(
@@ -390,16 +344,8 @@ if space == 'k-space':
             return fq[tnkgrid], fp[tnkgrid]
 
 
-        #@jit(nopython=True)
-        def gen_mat(p, q):
-            return qc_mat(p, q) + q_mat()
-
-
-
-
-
         @jit(nopython=True)
-        def qc_mat_gen(p, q):
+        def qc_mat_gen(p, q): # quantum-classical Hamiltonian in single branch
             pn = np.zeros(npoints)
             qn = np.zeros(npoints)
             pn[tnkgrid], qn[tnkgrid] = p, q
@@ -423,7 +369,7 @@ if space == 'k-space':
 
 
         @jit(nopython=True)
-        def get_dkk(eig_k_in, eig_j_in, evdiff):
+        def get_dkk(eig_k_in, eig_j_in, evdiff): # nonadiabaitc coupling in truncated basis
             dkkq = np.ascontiguousarray(np.zeros(npoints) + 0.0j)
             dkkp = np.ascontiguousarray(np.zeros(npoints) + 0.0j)
             eig_k_in = np.ascontiguousarray(eig_k_in)
@@ -444,21 +390,14 @@ if space == 'k-space':
                             np.dot(eig_k_mk, eig_j) - np.dot(eig_k_pk, eig_j))
             dkkq = dkkq / evdiff
             dkkp = dkkp / evdiff
-
-            # if np.any(np.imag(dkkq) > 0.0000001):
-            #    print('DKKQ error: ',np.imag(dkkq))
-            # if np.any(np.imag(dkkp) > 0.0000001):
-            #    print('DKKP error: ',np.imag(dkkp))
-            # return np.real(dkkq[tnkgrid]), np.real(dkkp[tnkgrid])
             return dkkq[tnkgrid], dkkp[tnkgrid]
     if model == 'holstein':
         @jit(nopython=True)
-        def quantumForce(coeffgrid):
+        def quantumForce(coeffgrid): # quantum force
             cg = np.ascontiguousarray(np.zeros(npoints) + 0.0j)
             cg[tnkgrid] = coeffgrid
             fq = np.ascontiguousarray(np.zeros(npoints))
             fp = np.ascontiguousarray(np.zeros(npoints))
-            coeffgrid = np.ascontiguousarray(coeffgrid)
             for kappa in nkgrid:
                 cgroll_pk = np.ascontiguousarray(np.conj(np.concatenate((cg[-kappa:], cg[:-kappa]))))
                 fq[cycle(int(npoints / 2) + kappa)] = gc * (np.sqrt(2 * w ** 3) / np.sqrt(npoints)) * np.real(
@@ -469,17 +408,11 @@ if space == 'k-space':
 
 
         @jit(nopython=True)
-        def gen_mat(p, q):
-            return qc_mat(p, q) + q_mat()
-
-
-        @jit(nopython=True)
-        def q_mat():
+        def q_mat(): # quantum Hamiltonian in k-space
             return np.diag(egridQ)
 
-
         @jit(nopython=True)
-        def qc_mat_gen(p, q):
+        def qc_mat_gen(p, q): # quantum-classical Hamiltonian in a single branch
             pn = np.zeros(npoints)
             qn = np.zeros(npoints)
             pn[tnkgrid], qn[tnkgrid] = p, q
@@ -493,14 +426,12 @@ if space == 'k-space':
                 kaparray = np.concatenate((kaparray[-1:], kaparray[:-1]))
             return outmat[tnkgrid][:, tnkgrid]
 
-
         @jit(nopython=True)
         def qc_mat(p, q):  # accepts all branches
             outmat = np.asfortranarray(np.zeros((len(p), len(tnkgrid), len(tnkgrid))) + 0.0j)
             for i in range(len(p)):
                 outmat[i] = qc_mat_gen(p[i], q[i])
             return outmat
-
 
         @jit(nopython=True)
         def get_dkk(eig_k_in, eig_j_in, evdiff):
@@ -524,14 +455,9 @@ if space == 'k-space':
                             np.dot(eig_k_mk, eig_j) - np.dot(eig_k_pk, eig_j))
             dkkq = dkkq / evdiff
             dkkp = dkkp / evdiff
-
-            # if np.any(np.imag(dkkq) > 0.0000001):
-            #    print('DKKQ error: ',np.imag(dkkq))
-            # if np.any(np.imag(dkkp) > 0.0000001):
-            #    print('DKKP error: ',np.imag(dkkp))
-            # return np.real(dkkq[tnkgrid]), np.real(dkkp[tnkgrid])
             return dkkq[tnkgrid], dkkp[tnkgrid]
     if model == 'peierls':
+        # generate phase-shift matrix for peierls coupling in k-space
         expmat2 = np.array([])
         for k1 in kgrid:
             for k2 in kgrid:
@@ -546,12 +472,11 @@ if space == 'k-space':
 
 
         @jit(nopython=True)
-        def quantumForce(coeffgrid):
+        def quantumForce(coeffgrid): # quantum force
             cg = np.ascontiguousarray(np.zeros(npoints) + 0.0j)
             cg[tnkgrid] = coeffgrid
             fq = np.ascontiguousarray(np.zeros(npoints))
             fp = np.ascontiguousarray(np.zeros(npoints))
-            coeffgrid = np.ascontiguousarray(coeffgrid)
             fact = np.ascontiguousarray(np.zeros(npoints))
             for kappa in nkgrid:
                 fact[tnkgrid] = \
@@ -565,12 +490,12 @@ if space == 'k-space':
 
 
         @jit(nopython=True)
-        def q_mat():
+        def q_mat(): # quantum Hamiltonian
             return np.diag(egridQ)
 
 
         @jit(nopython=True)
-        def qc_mat_gen(p, q):
+        def qc_mat_gen(p, q): # quantum-classical Hamiltonian in a single branch
             pn = np.zeros(npoints)
             qn = np.zeros(npoints)
             pn[tnkgrid], qn[tnkgrid] = p, q
@@ -594,7 +519,7 @@ if space == 'k-space':
             return outmat
 
         @jit(nopython=True)
-        def get_dkk(eig_k_in, eig_j_in, evdiff):
+        def get_dkk(eig_k_in, eig_j_in, evdiff): # nonadiabatic coupling in in truncated basis
             dkkq = np.ascontiguousarray(np.zeros(npoints) + 0.0j)
             dkkp = np.ascontiguousarray(np.zeros(npoints) + 0.0j)
             eig_k_in = np.ascontiguousarray(eig_k_in)
@@ -616,8 +541,6 @@ if space == 'k-space':
             dkkq = dkkq / evdiff
             dkkp = dkkp / evdiff
             return dkkq[tnkgrid], dkkp[tnkgrid]
-
-
 
 
 @ray.remote
@@ -742,7 +665,7 @@ def runSim(index, p0, q0):
                     akkp = (1 / 2) * (w ** 2) * np.sum(dkkp * dkkp)
                     bkkq = np.sum(p[i] * dkkq)
                     bkkp = -(w ** 2) * np.sum(q[i] * dkkp)
-                    disc = (bkkq + bkkp) ** 2 - 4 * (akkq + akkp) * m * ev_diff
+                    disc = (bkkq + bkkp) ** 2 - 4 * (akkq + akkp) * ev_diff
                     if disc >= 0:
                         if bkkq + bkkp < 0:
                             gamma = (bkkq + bkkp) + np.sqrt(disc)
@@ -810,19 +733,19 @@ def parallel_run_ray(nt, proc):
             simEcdat += simEc
             r_ind += 1
 
-    if path.exists(filename + '_resCdb.csv') & io:
+    if path.exists(filename + '_resCdb.csv'):
         simCdbdat += np.loadtxt(filename + '_resCdb.csv', delimiter=",")
-    if path.exists(filename + '_resFcdb.csv') & io:
+    if path.exists(filename + '_resFcdb.csv'):
         simFcdbdat += np.loadtxt(filename + '_resFcdb.csv', delimiter=",")
-    if path.exists(filename + '_resT.csv') & io:
+    if path.exists(filename + '_resT.csv'):
         simTdat += np.loadtxt(filename + '_resT.csv', delimiter=",")
-    if path.exists(filename + '_resFcpopB.csv') & io:
+    if path.exists(filename + '_resFcpopB.csv'):
         simFcpopBdat += np.loadtxt(filename + '_resFcpopB.csv', delimiter=",")
-    if path.exists(filename + '_resPopB.csv') & io:
+    if path.exists(filename + '_resPopB.csv'):
         simPopBdat += np.loadtxt(filename + '_resPopB.csv', delimiter=",")
-    if path.exists(filename + '_resEq.csv') & io:
+    if path.exists(filename + '_resEq.csv'):
         simEqdat += np.loadtxt(filename + '_resEq.csv', delimiter=",")
-    if path.exists(filename + '_resEc.csv') & io:
+    if path.exists(filename + '_resEc.csv'):
         simEqdat += np.loadtxt(filename + '_resEc.csv', delimiter=",")
     return simCdbdat, simFcdbdat, simTdat, simFcpopBdat, simPopBdat, simEqdat, simEcdat
 
@@ -832,22 +755,20 @@ print(filename, '\n')
 start_time = time.time()
 resCdb, resFcdb, resT, resFcpopB, resPopB, resEq, resEc = parallel_run_ray(ntrials, nprocs)
 
-if io:
-    np.savetxt(filename + '_resCdb.csv', resCdb, delimiter=",")
-    np.savetxt(filename + '_resFcdb.csv', resFcdb, delimiter=",")
-    np.savetxt(filename + '_resT.csv', resT, delimiter=",")
-    np.savetxt(filename + '_resFcpopB.csv', resFcpopB, delimiter=",")
-    np.savetxt(filename + '_resPopB.csv', resPopB, delimiter=",")
-    np.savetxt(filename + '_resEq.csv', resEq, delimiter=",")
-    np.savetxt(filename + '_resEc.csv', resEc, delimiter=",")
+np.savetxt(filename + '_resCdb.csv', resCdb, delimiter=",")
+np.savetxt(filename + '_resFcdb.csv', resFcdb, delimiter=",")
+np.savetxt(filename + '_resT.csv', resT, delimiter=",")
+np.savetxt(filename + '_resFcpopB.csv', resFcpopB, delimiter=",")
+np.savetxt(filename + '_resPopB.csv', resPopB, delimiter=",")
+np.savetxt(filename + '_resEq.csv', resEq, delimiter=",")
+np.savetxt(filename + '_resEc.csv', resEc, delimiter=",")
+np.savetxt(foldername + '/wgrid.csv', wgrid, delimiter=",")
+np.savetxt(foldername + '/wgridQ.csv', wgridQ, delimiter=",")
+if not (path.exists(foldername + '/' + 'output_file')):
+    with open(inputfile) as f:
+        f_out = open(foldername + '/' + 'output_file', "a")
+        for line in f:
+            f_out.write(line)
 end_time = time.time()
-if io:
-    np.savetxt(foldername + '/wgrid.csv', wgrid, delimiter=",")
-    np.savetxt(foldername + '/wgridQ.csv', wgridQ, delimiter=",")
-    if not (path.exists(foldername + '/' + 'output_file')):
-        with open(inputfile) as f:
-            f_out = open(foldername + '/' + 'output_file', "a")
-            for line in f:
-                f_out.write(line)
 print('Calculation Duration: ', end_time - start_time, '\n')
 print(filename)
