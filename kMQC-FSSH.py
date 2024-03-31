@@ -51,8 +51,7 @@ if space == 'r-space':
 ########## Shared Functions #############
 nkgrid = np.arange(0, npoints, dtype=int)
 
-
-def ktoIndex1(k): # convert k value to grid index
+def ktoIndex(k): # convert k value to grid index
     index = round((k + (np.pi / a)) / dk, 0)
     if index < 0:
         index = index + (npoints)
@@ -60,12 +59,13 @@ def ktoIndex1(k): # convert k value to grid index
         index = index - (npoints)
     return int(round(index))
 
+
 # construct truncated energy and frequency grids
 untkgrid = kgrid # untruncated grid
 kgrid = np.array([k for k in kgrid if k <= ran[1] and k >= ran[0]]) # truncated grid
-wgrid = np.array([wgrid[ktoIndex1(k)] for k in kgrid if k <= ran[1] and k >= ran[0]]) # truncated classical frequency
-tnkgrid = np.array([nkgrid[ktoIndex1(k)] for k in kgrid if k <= ran[1] and k >= ran[0]]) # truncated grid index
-wgridQ = np.array([wgridQ[ktoIndex1(k)] for k in kgrid if k <= ran[1] and k >= ran[0]]) # truncated quantum frequency
+wgrid = np.array([wgrid[ktoIndex(k)] for k in kgrid if k <= ran[1] and k >= ran[0]]) # truncated classical frequency
+tnkgrid = np.array([nkgrid[ktoIndex(k)] for k in kgrid if k <= ran[1] and k >= ran[0]]) # truncated grid index
+wgridQ = np.array([wgridQ[ktoIndex(k)] for k in kgrid if k <= ran[1] and k >= ran[0]]) # truncated quantum frequency
 egridQ = hbar * wgridQ # truncated quantum energy
 
 
@@ -118,7 +118,6 @@ with open(coeff_file) as f:
     for line in f:
         line = line.rstrip('\n')
         exec(str(line))
-
 
 @jit(nopython=True)
 def RK4(p_bath, q_bath, QF, dt): # Evovle classical coordinates with RK4
@@ -178,15 +177,19 @@ def rho_db_to_adb(rho_db, eigvec): # transform branched diabatic density matrix 
 
 
 def vec_adb_to_db(psi_adb, eigvec):
-    # in each branch, take eigvector matrix (last two indices) and multiply by psi (a raw in a matrix):
-    psi_db = np.einsum('...ij,...j', eigvec, psi_adb)
-    return psi_db
+    # transform adiabatic wavefunction to diabatic basis in all branches
+    return np.einsum('njk,nk->nj',eigvec,psi_adb)
 
+def vec_0_adb_to_db(psi_adb, eigvec):
+    # transform adiabatic wavefunction to diabatic basis in one branch
+    return np.einsum('jk,k->j',eigvec,psi_adb)
 
 def vec_db_to_adb(psi_db, eigvec):
-    # in each branch, take eigvector matrix (last two indices), transpose it, and multiply by psi (a raw in a matrix):
-    psi_ad = np.einsum('...ij,...i', eigvec, psi_db)
-    return psi_ad
+    # transform diabatic wavefunction to adiabatic basis in all branches
+    return np.einsum('nkj,nk->nj',np.conjugate(eigvec),psi_db)
+def vec_0_db_to_adb(psi_db, eigvec):
+    # transform diabatic wavefunction to adiabatic basis in one branch
+    return np.einsum('kj,k->j',np.conjugate(eigvec),psi_db)
 
 
 @jit(nopython=True)
@@ -461,8 +464,8 @@ if space == 'k-space':
         expmat2 = np.array([])
         for k1 in kgrid:
             for k2 in kgrid:
-                if ktoIndex1(k2 - k1) >= ktoIndex1(kgrid[0]) and ktoIndex1(k2 - k1) <= ktoIndex1(kgrid[-1]):
-                    if ktoIndex1(k1 - k2) >= ktoIndex1(kgrid[0]) and ktoIndex1(k1 - k2) <= ktoIndex1(kgrid[-1]):
+                if ktoIndex(k2 - k1) >= ktoIndex(kgrid[0]) and ktoIndex(k2 - k1) <= ktoIndex(kgrid[-1]):
+                    if ktoIndex(k1 - k2) >= ktoIndex(kgrid[0]) and ktoIndex(k1 - k2) <= ktoIndex(kgrid[-1]):
                         expmat2 = np.append(expmat2, 2.0j * (np.sin(a * k1) - np.sin(a * k2)))
                     else:
                         expmat2 = np.append(expmat2, 0)
@@ -575,7 +578,7 @@ def runSim(index, p0, q0):
     cg_db = np.zeros((npoints, npoints), dtype=complex)
     cg_db[:] = cg_db_0 # initial diabatic wavefunction in all branches
     cg_adb = np.zeros((npoints, npoints), dtype=complex)
-    cg_adb_0 = vec_db_to_adb(cg_db_0, eigvec_0)
+    cg_adb_0 = vec_0_db_to_adb(cg_db_0, eigvec_0)
     cg_adb[:] = cg_adb_0 # initial adiabatic wavefuntion in all branches
 
     ## initialize arrays to store outputs
@@ -594,15 +597,9 @@ def runSim(index, p0, q0):
     fq = np.zeros((npoints, npoints))  # initialize the force on the position coordinates (momentum derivative)
     fp = np.zeros((npoints, npoints))  # initialize the force on the momentum coordinates (position derivative)
     for i in range(len(act_surf_ind)):
-        if space == 'r-space':
-            fq0, fp0 = quantumForce(eigvec[i][:, act_surf_ind[i]])
-            fq[i] = fq0
-            fp[i] = fp0
-
-        if space == 'k-space':
-            fq0, fp0 = quantumForce(eigvec[i][:, act_surf_ind[i]])
-            fq[i] = fq0
-            fp[i] = fp0
+        fq0, fp0 = quantumForce(eigvec[i][:, act_surf_ind[i]])
+        fq[i] = fq0
+        fp[i] = fp0
     t_ind = 0
     for t_bath_ind in range(len(tdat_bath)):
         if tdat[t_ind] <= tdat_bath[t_bath_ind] + 0.5 * dt_bath or t_bath_ind == len(tdat_bath) - 1:
@@ -637,7 +634,7 @@ def runSim(index, p0, q0):
         eigval_exp = np.exp(-1j * eigval * dt_bath)
         np.einsum('...jj->...j', diag_matrix)[...] = eigval_exp
         cg_adb = np.einsum('...ij,...i', diag_matrix, vec_db_to_adb(cg_db, eigvec))
-        cg_db = vec_adb_to_db(cg_adb, np.conj(eigvec))
+        cg_db = vec_adb_to_db(cg_adb, eigvec)
         rand = np.random.rand()
         for i in range(len(act_surf)):
             prod_A1_0 = (np.matmul(np.conj(eigvec[i][:, act_surf_ind[i]]), eigvec_previous[i]))
@@ -682,15 +679,9 @@ def runSim(index, p0, q0):
                         act_surf[i][act_surf_ind[i]] = 1
                         hop_count += 1
                     break
-            if space == 'r-space':
-                fq0, fp0 = quantumForce(eigvec[i][:, act_surf_ind[i]])
-                fq[i] = fq0
-                fp[i] = fp0
-
-            if space == 'k-space':
-                fq0, fp0 = quantumForce(eigvec[i][:, act_surf_ind[i]])
-                fq[i] = fq0
-                fp[i] = fp0
+            fq0, fp0 = quantumForce(eigvec[i][:, act_surf_ind[i]])
+            fq[i] = fq0
+            fp[i] = fp0
     den_mat_db_sum = np.sum(den_mat_db_tot[:, :, :, :], axis=1)
     pops_db = np.real(np.einsum('...jj->...j', den_mat_db_sum))
     pops_db_fft = np.real(np.einsum('...jj->...j',np.einsum('aj,njk,bk->nab',F_nk_trunc,den_mat_db_sum,np.conjugate(F_nk_trunc))))
